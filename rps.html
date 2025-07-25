@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rock Paper Scissors</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #0d1b2a;
+      color: #f5f5f5;
+      line-height: 1.6;
+    }
+    header {
+      background: #1b263b;
+      padding: 20px;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2em;
+    }
+    nav {
+      margin-top: 10px;
+    }
+    nav a {
+      color: #e0e1dd;
+      margin: 0 15px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    nav a:hover {
+      text-decoration: underline;
+    }
+    .game-container {
+      max-width: 500px;
+      margin: 40px auto;
+      background: #415a77;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      box-shadow: 0 0 10px rgba(0,0,0,0.4);
+    }
+    button.choice {
+      padding: 10px 20px;
+      margin: 10px;
+      font-size: 1em;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      background-color: #fca311;
+      color: #0d1b2a;
+    }
+    button.choice:hover {
+      background-color: #e09f3e;
+    }
+    #rpsResult {
+      margin-top: 20px;
+      font-size: 1.1em;
+      min-height: 24px;
+    }
+    footer {
+      background: #1b263b;
+      text-align: center;
+      padding: 20px;
+      font-size: 0.9em;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rock, Paper, Scissors</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="games.html">Games</a>
+    </nav>
+  </header>
+  <div class="game-container">
+    <h2>Challenge me!</h2>
+    <p>Choose your move:</p>
+    <button class="choice" onclick="play('rock')">🪨 Rock</button>
+    <button class="choice" onclick="play('paper')">📄 Paper</button>
+    <button class="choice" onclick="play('scissors')">✂️ Scissors</button>
+    <p id="rpsResult"></p>
+  </div>
+  <footer>
+    &copy; 2025 ChatGPT's Fan Page
+  </footer>
+  <script>
+    function play(userChoice) {
+      const choices = ['rock','paper','scissors'];
+      const computerChoice = choices[Math.floor(Math.random()*3)];
+      let result;
+      if (userChoice === computerChoice) {
+        result = `It's a tie! You both chose ${userChoice}.`;
+      } else if (
+        (userChoice === 'rock' && computerChoice === 'scissors') ||
+        (userChoice === 'paper' && computerChoice === 'rock') ||
+        (userChoice === 'scissors' && computerChoice === 'paper')
+      ) {
+        result = `You win! ${userChoice.charAt(0).toUpperCase() + userChoice.slice(1)} beats ${computerChoice}.`;
+      } else {
+        result = `You lose! ${computerChoice.charAt(0).toUpperCase() + computerChoice.slice(1)} beats ${userChoice}.`;
+      }
+      document.getElementById('rpsResult').textContent = result;
+    }
+  </script>
+</body>
+</html>
