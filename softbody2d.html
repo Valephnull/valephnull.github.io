@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soft Body Simulation (2D)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #0d1b2a;
+      color: #f5f5f5;
+    }
+    header {
+      background: #1b263b;
+      padding: 20px;
+      text-align: center;
+    }
+    nav {
+      margin-top: 10px;
+    }
+    nav a {
+      color: #e0e1dd;
+      margin: 0 15px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    nav a:hover {
+      text-decoration: underline;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #415a77;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.4);
+      text-align: center;
+    }
+    canvas {
+      width: 100%;
+      height: 300px;
+      background-color: #274472;
+      border-radius: 4px;
+    }
+    footer {
+      background: #1b263b;
+      text-align: center;
+      padding: 20px;
+      font-size: 0.9em;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Soft Body Simulation (2D)</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="games.html">Games</a>
+      <a href="simulations.html">Simulations</a>
+    </nav>
+  </header>
+  <div class="container">
+    <p>This demo simulates a soft body using a mass–spring system. The top row of points is fixed in place while the rest of the grid is free to move under gravity. Click the canvas to disturb the cloth.</p>
+    <canvas id="softCanvas"></canvas>
+  </div>
+  <footer>&copy; 2025 ChatGPT's Fan Page</footer>
+  <script>
+    const canvas = document.getElementById('softCanvas');
+    const ctx = canvas.getContext('2d');
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.clientWidth * dpr;
+      canvas.height = canvas.clientHeight * dpr;
+      ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    const cols = 10;
+    const rows = 10;
+    const spacing = canvas.clientWidth / (cols + 1);
+    // Node list
+    const nodes = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        nodes.push({
+          x: (c + 1) * spacing,
+          y: 50 + r * (canvas.clientHeight - 100) / (rows - 1),
+          vx: 0,
+          vy: 0,
+          fixed: r === 0
+        });
+      }
+    }
+    // Springs connect horizontal and vertical neighbors
+    const springs = [];
+    function index(r, c) { return r * cols + c; }
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (c < cols - 1) {
+          springs.push({
+            a: index(r, c), b: index(r, c + 1), rest: spacing, k: 200
+          });
+        }
+        if (r < rows - 1) {
+          springs.push({
+            a: index(r, c), b: index(r + 1, c), rest: (canvas.clientHeight - 100) / (rows - 1), k: 200
+          });
+        }
+      }
+    }
+    const gravity = 500;
+    const damping = 0.98;
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      // apply disturbance by adding velocity to nearest node
+      let nearest = 0;
+      let minDist = Infinity;
+      nodes.forEach((node, idx) => {
+        const dx = node.x - x;
+        const dy = node.y - y;
+        const dist = dx * dx + dy * dy;
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = idx;
+        }
+      });
+      nodes[nearest].vy -= 300;
+    });
+    let lastTime = performance.now();
+    function loop(now) {
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+    function update(dt) {
+      // apply gravity
+      nodes.forEach(node => {
+        if (!node.fixed) {
+          node.vy += gravity * dt;
+        }
+      });
+      // apply spring forces
+      springs.forEach(s => {
+        const a = nodes[s.a];
+        const b = nodes[s.b];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist === 0) return;
+        const force = s.k * (dist - s.rest);
+        const fx = force * dx / dist;
+        const fy = force * dy / dist;
+        if (!a.fixed) {
+          a.vx += fx * dt * -1;
+          a.vy += fy * dt * -1;
+        }
+        if (!b.fixed) {
+          b.vx += fx * dt;
+          b.vy += fy * dt;
+        }
+      });
+      // integrate and apply damping
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      nodes.forEach(node => {
+        if (!node.fixed) {
+          node.x += node.vx * dt;
+          node.y += node.vy * dt;
+          node.vx *= damping;
+          node.vy *= damping;
+          // floor collision
+          const r = 3;
+          if (node.y > h - r) {
+            node.y = h - r;
+            node.vy *= -0.7;
+          }
+          if (node.y < 0) {
+            node.y = 0;
+            node.vy *= -0.7;
+          }
+          if (node.x < 0) {
+            node.x = 0;
+            node.vx *= -0.7;
+          }
+          if (node.x > w) {
+            node.x = w;
+            node.vx *= -0.7;
+          }
+        }
+      });
+    }
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // draw springs
+      ctx.beginPath();
+      ctx.strokeStyle = '#e0e1dd';
+      springs.forEach(s => {
+        const a = nodes[s.a];
+        const b = nodes[s.b];
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      });
+      ctx.stroke();
+      // draw nodes
+      nodes.forEach(node => {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = node.fixed ? '#fca311' : '#e0e1dd';
+        ctx.fill();
+      });
+    }
+    loop(performance.now());
+  </script>
+</body>
+</html>
