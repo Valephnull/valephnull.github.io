@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ChatGPT is Awesome</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NTSC‑RS Web Port</title>
   <style>
-    /* Global styles */
+    /* Base styling */
     body {
       margin: 0;
       font-family: Arial, sans-serif;
@@ -22,60 +22,316 @@
       margin: 0;
       font-size: 2em;
     }
-    nav {
-      margin-top: 10px;
+    .container {
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 0 15px;
     }
-    nav a {
-      color: #e0e1dd;
-      margin: 0 15px;
-      text-decoration: none;
-      font-weight: bold;
-    }
-    nav a:hover {
-      text-decoration: underline;
-    }
-    .hero {
-      padding: 60px 20px;
-      text-align: center;
-      background: #415a77;
-    }
-    .hero h2 {
-      font-size: 2.5em;
-      margin-bottom: 10px;
-    }
-    .hero p {
-      font-size: 1.2em;
-      max-width: 600px;
+    #videoArea {
+      position: relative;
+      width: 640px;
+      height: 480px;
       margin: 0 auto;
+      border: 4px solid #415a77;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.7);
     }
-    footer {
-      background: #1b263b;
+    #displayCanvas {
+      width: 100%;
+      height: 100%;
+      cursor: ns-resize; /* indicate vertical adjustment */
+    }
+    .controls {
+      margin-top: 15px;
       text-align: center;
-      padding: 20px;
+    }
+    .controls label {
+      margin-right: 10px;
+    }
+    #intensity-indicator {
+      margin-top: 10px;
+      text-align: center;
       font-size: 0.9em;
+      color: #aabec6;
+    }
+    button {
+      padding: 8px 12px;
+      margin-right: 10px;
+      background: #778da9;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>ChatGPT is Awesome</h1>
-    <nav>
-      <a href="index.html">Home</a>
-      <a href="about.html">About</a>
-      <a href="games.html">Games</a>
-      <a href="simulations.html">Simulations</a>
-      
-      <a href="vhs.html">VHS/VCR</a>
-      /nav>
+    <h1>NTSC‑RS Web Port</h1>
+    <p>A browser‑based VHS/NTSC simulator</p>
+  </header>
+  <div class="container">
+    <div class="controls">
+      <label>
+        Upload video/image:
+        <input type="file" id="fileInput" accept="video/*,image/*" />
+      </label>
+      <button id="startCamera">Use Camera</button>
+      <button id="recordBtn" disabled>Start Recording</button>
+    </div>
+    <div id="videoArea">
+      <!-- Hidden media elements -->
+      <video id="video" playsinline style="display:none"></video>
+      <canvas id="sourceCanvas" width="640" height="480" style="display:none"></canvas>
+      <!-- Display canvas for processed output -->
+      <canvas id="displayCanvas" width="640" height="480"></canvas>
+    </div>
+    <div class="controls">
+      <label><input type="checkbox" id="toggleScan" checked /> Scanlines</label>
+      <label><input type="checkbox" id="toggleColor" checked /> Color bleed</label>
+      <label><input type="checkbox" id="toggleNoise" checked /> Static noise</label>
+      <label><input type="checkbox" id="toggleJitter" checked /> Frame jitter</label>
+      <label><input type="checkbox" id="toggleDrop" checked /> Dropout lines</label>
+    </div>
+    <div id="intensity-indicator">Intensity: 100%</div>
+  </div>
+  <script>
+    // DOM references
+    const fileInput = document.getElementById('fileInput');
+    const startCameraBtn = document.getElementById('startCamera');
+    const recordBtn = document.getElementById('recordBtn');
+    const video = document.getElementById('video');
+    const sourceCanvas = document.getElementById('sourceCanvas');
+    const displayCanvas = document.getElementById('displayCanvas');
+    const sourceCtx = sourceCanvas.getContext('2d');
+    const displayCtx = displayCanvas.getContext('2d');
+    const intensityIndicator = document.getElementById('intensity-indicator');
+    const controls = {
+      scan: document.getElementById('toggleScan'),
+      color: document.getElementById('toggleColor'),
+      noise: document.getElementById('toggleNoise'),
+      jitter: document.getElementById('toggleJitter'),
+      drop: document.getElementById('toggleDrop'),
+    };
 
-           
-    
-  <section class="hero">
-    <h2>Welcome to the world of ChatGPT!</h2>
-    <p>Explore my capabilities, learn about my origin, or play some fun games. I'm presented here as a friendly monitor living in a server rack—ready to chat and entertain.</p>
-  </section>
-  <footer>
-    &copy; 2025 ChatGPT's Fan Page
-  </footer>
+    let intensity = 1.0; // Global intensity factor
+    let recording = false;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let animationFrameId = null;
+    let currentSource = null; // 'video', 'image', or 'camera'
+
+    // Update intensity based on vertical position over display canvas
+    function updateIntensityFromPosition(y) {
+      const rect = displayCanvas.getBoundingClientRect();
+      const relativeY = Math.max(0, Math.min(y - rect.top, rect.height));
+      const ratio = 1 - (relativeY / rect.height);
+      // intensity ranges 0.5 to 2.0
+      intensity = 0.5 + (1.5 * ratio);
+      intensityIndicator.textContent = `Intensity: ${Math.round(intensity * 100)}%`;
+    }
+
+    displayCanvas.addEventListener('mousemove', (e) => {
+      if (e.buttons === 1 || e.buttons === 0) {
+        updateIntensityFromPosition(e.clientY);
+      }
+    });
+    displayCanvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length) {
+        updateIntensityFromPosition(e.touches[0].clientY);
+      }
+    });
+
+    // File input handler
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      stopCurrentSource();
+      const url = URL.createObjectURL(file);
+      if (file.type.startsWith('video')) {
+        currentSource = 'video';
+        video.srcObject = null;
+        video.src = url;
+        video.loop = true;
+        await video.play();
+        processVideoFrame();
+      } else if (file.type.startsWith('image')) {
+        currentSource = 'image';
+        const img = new Image();
+        img.onload = () => {
+          sourceCanvas.width = img.width;
+          sourceCanvas.height = img.height;
+          displayCanvas.width = img.width;
+          displayCanvas.height = img.height;
+          sourceCtx.drawImage(img, 0, 0);
+          processImageFrame();
+        };
+        img.src = url;
+      }
+    });
+
+    // Start camera
+    startCameraBtn.addEventListener('click', async () => {
+      stopCurrentSource();
+      currentSource = 'camera';
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        video.srcObject = stream;
+        await video.play();
+        processVideoFrame();
+      } catch (err) {
+        alert('Webcam access denied or unavailable.');
+        console.error(err);
+      }
+    });
+
+    // Recording handler
+    recordBtn.addEventListener('click', () => {
+      if (!recording) {
+        // Start recording
+        const stream = displayCanvas.captureStream(30);
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        recordedChunks = [];
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'ntsc-rs-recording.webm';
+          a.click();
+        };
+        mediaRecorder.start();
+        recording = true;
+        recordBtn.textContent = 'Stop Recording';
+      } else {
+        // Stop recording
+        mediaRecorder.stop();
+        recording = false;
+        recordBtn.textContent = 'Start Recording';
+      }
+    });
+
+    // Stop any current media source and cancel animation
+    function stopCurrentSource() {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (video.srcObject) {
+        // stop camera
+        const tracks = video.srcObject.getTracks();
+        tracks.forEach((t) => t.stop());
+        video.srcObject = null;
+      }
+      video.pause();
+      video.src = '';
+      recordBtn.disabled = true;
+    }
+
+    // Process image (single frame)
+    function processImageFrame() {
+      const frame = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+      const output = applyNTSC(frame);
+      displayCtx.putImageData(output, 0, 0);
+      recordBtn.disabled = false;
+    }
+
+    // Process video/camera frames in a loop
+    function processVideoFrame() {
+      if (!video.paused && !video.ended) {
+        // Resize canvases to video frame size
+        if (sourceCanvas.width !== video.videoWidth || sourceCanvas.height !== video.videoHeight) {
+          sourceCanvas.width = video.videoWidth;
+          sourceCanvas.height = video.videoHeight;
+          displayCanvas.width = video.videoWidth;
+          displayCanvas.height = video.videoHeight;
+        }
+        sourceCtx.drawImage(video, 0, 0, sourceCanvas.width, sourceCanvas.height);
+        const frame = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+        const output = applyNTSC(frame);
+        displayCtx.putImageData(output, 0, 0);
+        recordBtn.disabled = false;
+      }
+      animationFrameId = requestAnimationFrame(processVideoFrame);
+    }
+
+    // Apply NTSC/VHS effects to an ImageData object and return new ImageData
+    function applyNTSC(frame) {
+      const data = frame.data;
+      const width = frame.width;
+      const height = frame.height;
+      const output = new Uint8ClampedArray(data); // copy of pixel data
+      // Precompute offsets for color bleed and jitter
+      const rowShiftR = new Int16Array(height);
+      const rowShiftB = new Int16Array(height);
+      const rowJitter = new Int16Array(height);
+      for (let y = 0; y < height; y++) {
+        // Slight random horizontal shifts for red and blue channels; scaled by intensity
+        rowShiftR[y] = controls.color.checked ? Math.floor((Math.random() - 0.5) * 2 * intensity) : 0;
+        rowShiftB[y] = controls.color.checked ? Math.floor((Math.random() - 0.5) * 2 * intensity) : 0;
+        // Jitter (overall horizontal shift)
+        rowJitter[y] = controls.jitter.checked ? Math.floor((Math.random() - 0.5) * 4 * intensity) : 0;
+      }
+      // Optionally generate dropout lines positions
+      const dropoutLines = [];
+      if (controls.drop.checked) {
+        const dropCount = Math.floor(Math.random() * intensity * 3);
+        for (let i = 0; i < dropCount; i++) {
+          dropoutLines.push(Math.floor(Math.random() * height));
+        }
+      }
+      // Iterate over rows and columns
+      for (let y = 0; y < height; y++) {
+        const jitterOffset = rowJitter[y];
+        const shiftR = rowShiftR[y];
+        const shiftB = rowShiftB[y];
+        const isDrop = dropoutLines.includes(y);
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          // Compute indices for color-shifted channels (wrap around edges)
+          const xR = (x + shiftR + jitterOffset + width) % width;
+          const xB = (x + shiftB + jitterOffset + width) % width;
+          const baseIdxR = (y * width + xR) * 4;
+          const baseIdxB = (y * width + xB) * 4;
+          // Retrieve channels from source
+          let r = data[baseIdxR];
+          let g = data[idx + 1];
+          let b = data[baseIdxB + 2];
+          // Apply static noise
+          if (controls.noise.checked) {
+            const noise = (Math.random() - 0.5) * 30 * intensity;
+            r = r + noise;
+            g = g + noise;
+            b = b + noise;
+          }
+          // Apply scanlines (interlacing) by darkening every other line
+          if (controls.scan.checked && (y % 2 === 0)) {
+            r *= 0.8;
+            g *= 0.8;
+            b *= 0.8;
+          }
+          // Dropout lines: set row to black
+          if (isDrop) {
+            r = g = b = 0;
+          }
+          // Clamp values
+          output[idx] = Math.min(255, Math.max(0, r));
+          output[idx + 1] = Math.min(255, Math.max(0, g));
+          output[idx + 2] = Math.min(255, Math.max(0, b));
+          // Preserve alpha
+          output[idx + 3] = data[idx + 3];
+        }
+      }
+      return new ImageData(output, width, height);
+    }
+
+    // When page is unloaded, stop any media
+    window.addEventListener('beforeunload', () => {
+      stopCurrentSource();
+    });
+  </script>
 </body>
 </html>
