@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soft Body Simulation (3D)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #0d1b2a;
+      color: #f5f5f5;
+    }
+    header {
+      background: #1b263b;
+      padding: 20px;
+      text-align: center;
+    }
+    nav {
+      margin-top: 10px;
+    }
+    nav a {
+      color: #e0e1dd;
+      margin: 0 15px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    nav a:hover {
+      text-decoration: underline;
+    }
+    #sceneContainer {
+      width: 100%;
+      height: 400px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #415a77;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.4);
+      text-align: center;
+    }
+    footer {
+      background: #1b263b;
+      text-align: center;
+      padding: 20px;
+      font-size: 0.9em;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Soft Body Simulation (3D)</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="games.html">Games</a>
+      <a href="simulations.html">Simulations</a>
+    </nav>
+  </header>
+  <div class="container">
+    <p>This 3D demo simulates a soft cloth using a grid of points connected by springs. The top edge is fixed in space while the rest falls under gravity. You can rotate the view with your mouse.</p>
+    <div id="sceneContainer"></div>
+  </div>
+  <footer>&copy; 2025 ChatGPT's Fan Page</footer>
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    const container = document.getElementById('sceneContainer');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x274472);
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+    camera.position.set(0, 8, 15);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    // lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    const dLight = new THREE.DirectionalLight(0xffffff, 1);
+    dLight.position.set(10, 15, 5);
+    scene.add(dLight);
+    // floor
+    const floorGeo = new THREE.PlaneGeometry(20, 20);
+    const floorMat = new THREE.MeshPhongMaterial({ color: 0x415a77, side: THREE.DoubleSide });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+    // cloth geometry
+    const clothWidth = 10;
+    const clothHeight = 10;
+    const segmentsX = 15;
+    const segmentsY = 15;
+    const geometry = new THREE.PlaneGeometry(clothWidth, clothHeight, segmentsX, segmentsY);
+    geometry.rotateX(-Math.PI / 2);
+    const material = new THREE.MeshPhongMaterial({ color: 0xfca311, side: THREE.DoubleSide, wireframe: true });
+    const cloth = new THREE.Mesh(geometry, material);
+    scene.add(cloth);
+    const positions = geometry.attributes.position;
+    const vertices = [];
+    const velocities = [];
+    const fixed = [];
+    // initialize vertices
+    for (let i = 0; i < positions.count; i++) {
+      const vertex = new THREE.Vector3().fromBufferAttribute(positions, i);
+      vertices.push(vertex.clone());
+      velocities.push(new THREE.Vector3());
+      // fix the top row (highest z after rotation). The plane has been rotated, so Y is up and Z is depth. After rotateX(-90deg), the original plane's width along X and height along Z; top row has largest Z ~ clothHeight/2.
+      const row = Math.floor(i / (segmentsX + 1));
+      fixed.push(row === 0);
+    }
+    // build springs between neighbours
+    const springs = [];
+    function vertIndex(ix, iy) {
+      return iy * (segmentsX + 1) + ix;
+    }
+    // compute rest lengths from initial positions
+    for (let iy = 0; iy <= segmentsY; iy++) {
+      for (let ix = 0; ix <= segmentsX; ix++) {
+        const i = vertIndex(ix, iy);
+        // horizontal spring
+        if (ix < segmentsX) {
+          const j = vertIndex(ix + 1, iy);
+          springs.push({ a: i, b: j, rest: vertices[i].distanceTo(vertices[j]) });
+        }
+        // vertical spring
+        if (iy < segmentsY) {
+          const j = vertIndex(ix, iy + 1);
+          springs.push({ a: i, b: j, rest: vertices[i].distanceTo(vertices[j]) });
+        }
+      }
+    }
+    const gravity = new THREE.Vector3(0, -9.8, 0);
+    const k = 100; // spring constant
+    const damping = 0.98;
+    function update(dt) {
+      // apply gravity
+      for (let i = 0; i < vertices.length; i++) {
+        if (!fixed[i]) {
+          velocities[i].addScaledVector(gravity, dt);
+        }
+      }
+      // apply spring forces
+      springs.forEach(s => {
+        const a = s.a;
+        const b = s.b;
+        const va = vertices[a];
+        const vb = vertices[b];
+        const delta = new THREE.Vector3().subVectors(vb, va);
+        const dist = delta.length();
+        if (dist === 0) return;
+        const forceMag = k * (dist - s.rest);
+        delta.normalize().multiplyScalar(forceMag);
+        if (!fixed[a]) {
+          velocities[a].addScaledVector(delta, dt);
+        }
+        if (!fixed[b]) {
+          velocities[b].addScaledVector(delta, -dt);
+        }
+      });
+      // integrate positions and apply damping and floor collision
+      for (let i = 0; i < vertices.length; i++) {
+        if (!fixed[i]) {
+          vertices[i].addScaledVector(velocities[i], dt);
+          velocities[i].multiplyScalar(damping);
+          // floor collision
+          if (vertices[i].y < 0) {
+            vertices[i].y = 0;
+            velocities[i].y *= -0.5;
+          }
+        }
+      }
+      // copy back to geometry attribute
+      for (let i = 0; i < vertices.length; i++) {
+        positions.setXYZ(i, vertices[i].x, vertices[i].y, vertices[i].z);
+      }
+      positions.needsUpdate = true;
+      geometry.computeVertexNormals();
+    }
+    let lastTime = performance.now();
+    function animate(now) {
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      update(dt);
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+    animate(performance.now());
+  </script>
+</body>
+</html>
