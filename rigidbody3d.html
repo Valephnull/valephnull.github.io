@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rigid Body Simulation (3D)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #0d1b2a;
+      color: #f5f5f5;
+    }
+    header {
+      background: #1b263b;
+      padding: 20px;
+      text-align: center;
+    }
+    nav {
+      margin-top: 10px;
+    }
+    nav a {
+      color: #e0e1dd;
+      margin: 0 15px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    nav a:hover {
+      text-decoration: underline;
+    }
+    #sceneContainer {
+      width: 100%;
+      height: 400px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #415a77;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.4);
+      text-align: center;
+    }
+    footer {
+      background: #1b263b;
+      text-align: center;
+      padding: 20px;
+      font-size: 0.9em;
+      margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rigid Body Simulation (3D)</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="games.html">Games</a>
+      <a href="simulations.html">Simulations</a>
+    </nav>
+  </header>
+  <div class="container">
+    <p>This 3D demo simulates simple falling cubes with basic gravity and bouncing. Click inside the scene to drop a new cube.</p>
+    <div id="sceneContainer"></div>
+  </div>
+  <footer>&copy; 2025 ChatGPT's Fan Page</footer>
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    const container = document.getElementById('sceneContainer');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x274472);
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+    camera.position.set(5, 8, 15);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    // floor
+    const floorGeo = new THREE.PlaneGeometry(20, 20);
+    const floorMat = new THREE.MeshPhongMaterial({ color: 0x415a77, side: THREE.DoubleSide });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotateX(-Math.PI / 2);
+    scene.add(floor);
+    // lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(10, 15, 5);
+    scene.add(light);
+    // cubes list
+    const cubes = [];
+    const velocities = [];
+    const gravity = 9.8;
+    const restitution = 0.7;
+    function addCube(x, y, z) {
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+      const cube = new THREE.Mesh(geo, mat);
+      cube.position.set(x, y, z);
+      scene.add(cube);
+      cubes.push(cube);
+      velocities.push(new THREE.Vector3((Math.random()-0.5)*2, 0, (Math.random()-0.5)*2));
+    }
+    // initial cube
+    addCube(0, 5, 0);
+    container.addEventListener('mousedown', (e) => {
+      // drop new cube above the origin, random x-z
+      const rect = container.getBoundingClientRect();
+      const x = (Math.random() - 0.5) * 8;
+      const z = (Math.random() - 0.5) * 8;
+      addCube(x, 8, z);
+    });
+    let lastTime = performance.now();
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      // update cube physics
+      for (let i = 0; i < cubes.length; i++) {
+        const cube = cubes[i];
+        const vel = velocities[i];
+        vel.y -= gravity * dt;
+        cube.position.addScaledVector(vel, dt);
+        // floor collision (assuming cube size 1)
+        const half = 0.5;
+        if (cube.position.y - half < 0) {
+          cube.position.y = half;
+          vel.y = -vel.y * restitution;
+        }
+        // boundary collisions
+        const bounds = 10;
+        if (cube.position.x - half < -bounds) {
+          cube.position.x = -bounds + half;
+          vel.x = -vel.x * restitution;
+        }
+        if (cube.position.x + half > bounds) {
+          cube.position.x = bounds - half;
+          vel.x = -vel.x * restitution;
+        }
+        if (cube.position.z - half < -bounds) {
+          cube.position.z = -bounds + half;
+          vel.z = -vel.z * restitution;
+        }
+        if (cube.position.z + half > bounds) {
+          cube.position.z = bounds - half;
+          vel.z = -vel.z * restitution;
+        }
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+    animate(performance.now());
+  </script>
+</body>
+</html>
