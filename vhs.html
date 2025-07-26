@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VHS Webcam Simulation</title>
+  <style>
+    /* Overall page styling to match the rest of the site */
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #0d1b2a;
+      color: #f5f5f5;
+    }
+    header {
+      background: #1b263b;
+      padding: 20px;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2em;
+    }
+    nav {
+      margin-top: 10px;
+    }
+    nav a {
+      color: #e0e1dd;
+      margin: 0 15px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    nav a:hover {
+      text-decoration: underline;
+    }
+    footer {
+      background: #1b263b;
+      text-align: center;
+      padding: 20px;
+      font-size: 0.9em;
+      margin-top: 40px;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 70vh;
+      margin: 40px auto;
+    }
+    #vhsCanvas {
+      width: 640px;
+      height: 480px;
+      background: #000;
+      position: relative;
+    }
+    /* Overlay for scanlines */
+    .scanlines {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.04) 0px,
+        rgba(255, 255, 255, 0.04) 1px,
+        rgba(0, 0, 0, 0.04) 1px,
+        rgba(0, 0, 0, 0.04) 3px
+      );
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>VHS Webcam Simulation</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="games.html">Games</a>
+      <a href="simulations.html">Simulations</a>
+      <a href="vhs.html">VHS</a>
+    </nav>
+  </header>
+  <div class="container">
+    <p>Allow access to your webcam to see yourself through a VHS tape. The effect includes scanlines, noise, slight color bleed and horizontal jitter.</p>
+    <div id="videoWrapper" style="position: relative;">
+      <video id="video" autoplay playsinline width="640" height="480" style="display: none;"></video>
+      <canvas id="vhsCanvas" width="640" height="480"></canvas>
+      <div class="scanlines"></div>
+    </div>
+  </div>
+  <footer>&copy; 2025 ChatGPT's Fan Page</footer>
+  <script>
+    // This script captures webcam and renders to canvas with VHS-like artifacts
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('vhsCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Generate random noise frame
+    function generateNoise(imageData) {
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const rand = (Math.random() - 0.5) * 25; // noise intensity
+        data[i] += rand;     // red
+        data[i + 1] += rand; // green
+        data[i + 2] += rand; // blue
+      }
+      return imageData;
+    }
+
+    // Slight horizontal jitter to simulate VHS tracking issues
+    function applyJitter(xOffset) {
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.putImageData(frame, xOffset, 0);
+    }
+
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          requestAnimationFrame(render);
+        };
+      } catch (err) {
+        console.error('Error accessing webcam: ', err);
+        ctx.fillStyle = '#f5f5f5';
+        ctx.font = '16px Arial';
+        ctx.fillText('Webcam access is required for this demo.', 20, 40);
+      }
+    }
+
+    let lastJitterTime = 0;
+    function render(timestamp) {
+      // Draw current video frame
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // Extract image data to add noise
+      let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      frame = generateNoise(frame);
+      ctx.putImageData(frame, 0, 0);
+      // Random jitter every ~200ms
+      if (timestamp - lastJitterTime > 200) {
+        const jitterAmount = (Math.random() - 0.5) * 10; // jitter magnitude up to ±5px
+        applyJitter(jitterAmount);
+        lastJitterTime = timestamp;
+      }
+      requestAnimationFrame(render);
+    }
+
+    start();
+  </script>
+</body>
+</html>
