@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VHS Webcam Simulation</title>
+  <title>VHS / VCR Simulation</title>
   <style>
-    /* Overall page styling to match the rest of the site */
+    /* Base styling consistent with the rest of the site */
     body {
       margin: 0;
       font-family: Arial, sans-serif;
@@ -41,116 +41,207 @@
       margin-top: 40px;
     }
     .container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 70vh;
-      margin: 40px auto;
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 0 15px;
     }
-    #vhsCanvas {
+    .video-area {
+      position: relative;
       width: 640px;
       height: 480px;
-      background: #000;
-      position: relative;
+      margin: 0 auto;
+      border: 4px solid #415a77;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.7);
     }
-    /* Overlay for scanlines */
-    .scanlines {
-      position: absolute;
-      top: 0;
-      left: 0;
+    #displayCanvas {
       width: 100%;
       height: 100%;
-      background-image: repeating-linear-gradient(
-        to bottom,
-        rgba(255, 255, 255, 0.04) 0px,
-        rgba(255, 255, 255, 0.04) 1px,
-        rgba(0, 0, 0, 0.04) 1px,
-        rgba(0, 0, 0, 0.04) 3px
-      );
-      pointer-events: none;
+      cursor: ns-resize; /* indicate vertical adjustment */
+    }
+    .controls {
+      margin-top: 15px;
+      text-align: center;
+    }
+    .controls label {
+      margin-right: 10px;
+    }
+    #intensity-indicator {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 0.9em;
+      color: #aabec6;
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>VHS Webcam Simulation</h1>
+    <h1>VHS / VCR Simulation</h1>
     <nav>
       <a href="index.html">Home</a>
       <a href="about.html">About</a>
       <a href="games.html">Games</a>
       <a href="simulations.html">Simulations</a>
-      <a href="vhs.html">VHS</a>
+      <a href="vhs.html">VHS/VCR</a>
     </nav>
   </header>
   <div class="container">
-    <p>Allow access to your webcam to see yourself through a VHS tape. The effect includes scanlines, noise, slight color bleed and horizontal jitter.</p>
-    <div id="videoWrapper" style="position: relative;">
-      <video id="video" autoplay playsinline width="640" height="480" style="display: none;"></video>
-      <canvas id="vhsCanvas" width="640" height="480"></canvas>
-      <div class="scanlines"></div>
+    <p>This demo uses your webcam and applies several analog artifacts inspired by VHS tapes and NTSC video. Move your mouse vertically over the video window to adjust overall distortion (50% at the bottom to 200% at the top). You can also toggle individual effects below.</p>
+    <div class="video-area" id="videoArea">
+      <!-- Hidden video element for capturing webcam -->
+      <video id="video" autoplay playsinline width="640" height="480" style="display:none;"></video>
+      <!-- Offscreen canvas to capture raw video -->
+      <canvas id="sourceCanvas" width="640" height="480" style="display:none;"></canvas>
+      <!-- Display canvas for processed output -->
+      <canvas id="displayCanvas" width="640" height="480"></canvas>
     </div>
+    <div class="controls">
+      <label><input type="checkbox" id="toggleScan" checked> Scanlines</label>
+      <label><input type="checkbox" id="toggleColor" checked> Color bleed</label>
+      <label><input type="checkbox" id="toggleNoise" checked> Static noise</label>
+      <label><input type="checkbox" id="toggleJitter" checked> Frame jitter</label>
+      <label><input type="checkbox" id="toggleDrop" checked> Dropout lines</label>
+    </div>
+    <div id="intensity-indicator">Intensity: 100%</div>
   </div>
   <footer>&copy; 2025 ChatGPT's Fan Page</footer>
   <script>
-    // This script captures webcam and renders to canvas with VHS-like artifacts
+    // Access DOM elements
     const video = document.getElementById('video');
-    const canvas = document.getElementById('vhsCanvas');
-    const ctx = canvas.getContext('2d');
+    const sourceCanvas = document.getElementById('sourceCanvas');
+    const displayCanvas = document.getElementById('displayCanvas');
+    const sourceCtx = sourceCanvas.getContext('2d');
+    const displayCtx = displayCanvas.getContext('2d');
+    const intensityIndicator = document.getElementById('intensity-indicator');
+    const controls = {
+      scan: document.getElementById('toggleScan'),
+      color: document.getElementById('toggleColor'),
+      noise: document.getElementById('toggleNoise'),
+      jitter: document.getElementById('toggleJitter'),
+      drop: document.getElementById('toggleDrop')
+    };
 
-    // Generate random noise frame
-    function generateNoise(imageData) {
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const rand = (Math.random() - 0.5) * 25; // noise intensity
-        data[i] += rand;     // red
-        data[i + 1] += rand; // green
-        data[i + 2] += rand; // blue
+    // Global intensity factor (0.5–2.0). Controls overall strength of effects.
+    let intensity = 1.0;
+
+    // Setup vertical intensity adjustment based on mouse position over display canvas
+    function updateIntensityFromPosition(y) {
+      const rect = displayCanvas.getBoundingClientRect();
+      const relativeY = Math.min(Math.max(y - rect.top, 0), rect.height);
+      const ratio = 1 - (relativeY / rect.height);
+      intensity = 0.5 + (1.5 * ratio);
+      intensityIndicator.textContent = `Intensity: ${Math.round(intensity * 100)}%`;
+    }
+    displayCanvas.addEventListener('mousemove', (e) => {
+      updateIntensityFromPosition(e.clientY);
+    });
+    // For mobile: support touch
+    displayCanvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length) {
+        updateIntensityFromPosition(e.touches[0].clientY);
       }
-      return imageData;
-    }
+    });
 
-    // Slight horizontal jitter to simulate VHS tracking issues
-    function applyJitter(xOffset) {
-      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.putImageData(frame, xOffset, 0);
-    }
-
-    async function start() {
+    // Initialize webcam
+    async function startWebcam() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play();
-          requestAnimationFrame(render);
-        };
+        await video.play();
+        requestAnimationFrame(processFrame);
       } catch (err) {
-        console.error('Error accessing webcam: ', err);
-        ctx.fillStyle = '#f5f5f5';
-        ctx.font = '16px Arial';
-        ctx.fillText('Webcam access is required for this demo.', 20, 40);
+        console.error('Webcam access denied:', err);
+        displayCtx.fillStyle = '#f5f5f5';
+        displayCtx.font = '16px Arial';
+        displayCtx.fillText('Webcam access is required for this demo.', 20, 40);
       }
     }
 
-    let lastJitterTime = 0;
-    function render(timestamp) {
-      // Draw current video frame
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      // Extract image data to add noise
-      let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      frame = generateNoise(frame);
-      ctx.putImageData(frame, 0, 0);
-      // Random jitter every ~200ms
-      if (timestamp - lastJitterTime > 200) {
-        const jitterAmount = (Math.random() - 0.5) * 10; // jitter magnitude up to ±5px
-        applyJitter(jitterAmount);
-        lastJitterTime = timestamp;
+    // Process each frame: apply VHS/NTSC artifacts
+    function processFrame() {
+      // Draw current frame to offscreen canvas
+      sourceCtx.drawImage(video, 0, 0, sourceCanvas.width, sourceCanvas.height);
+      const frame = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+      const data = frame.data;
+      const width = frame.width;
+      const height = frame.height;
+
+      // Create a new Uint8ClampedArray for output (copy of data to modify)
+      const output = new Uint8ClampedArray(data);
+
+      // Precompute row offsets for color bleed and jitter
+      const rowShiftR = new Int16Array(height);
+      const rowShiftB = new Int16Array(height);
+      const rowJitter = new Int16Array(height);
+      for (let y = 0; y < height; y++) {
+        // Slight random horizontal shifts for red and blue channels; scaled by intensity
+        rowShiftR[y] = controls.color.checked ? Math.floor((Math.random() - 0.5) * 2 * intensity) : 0;
+        rowShiftB[y] = controls.color.checked ? Math.floor((Math.random() - 0.5) * 3 * intensity) : 0;
+        // Frame jitter: small horizontal offset for each row
+        rowJitter[y] = controls.jitter.checked ? Math.floor((Math.random() - 0.5) * 2 * intensity) : 0;
       }
-      requestAnimationFrame(render);
+      // Optionally generate dropout lines positions
+      const dropoutLines = [];
+      if (controls.drop.checked) {
+        const dropCount = Math.floor(Math.random() * intensity * 3); // up to a few lines depending on intensity
+        for (let i = 0; i < dropCount; i++) {
+          dropoutLines.push(Math.floor(Math.random() * height));
+        }
+      }
+
+      // Iterate over rows and columns
+      for (let y = 0; y < height; y++) {
+        const jitterOffset = rowJitter[y];
+        const shiftR = rowShiftR[y];
+        const shiftB = rowShiftB[y];
+        const isDrop = dropoutLines.includes(y);
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          // Compute indices for color-shifted channels
+          // Use modulo to wrap around edges
+          const xR = (x + shiftR + jitterOffset + width) % width;
+          const xB = (x + shiftB + jitterOffset + width) % width;
+          const baseIdxR = (y * width + xR) * 4;
+          const baseIdxG = ((y * width + ((x + jitterOffset + width) % width))) * 4;
+          const baseIdxB = (y * width + xB) * 4;
+          // Retrieve channels from source data
+          let r = data[baseIdxR];
+          let g = data[baseIdxG + 1];
+          let b = data[baseIdxB + 2];
+          // Apply static noise
+          if (controls.noise.checked) {
+            const noise = (Math.random() - 0.5) * 30 * intensity;
+            r = r + noise;
+            g = g + noise;
+            b = b + noise;
+          }
+          // Apply scanlines (interlacing) by darkening every other line
+          if (controls.scan.checked && (y % 2 === 0)) {
+            r *= 0.8;
+            g *= 0.8;
+            b *= 0.8;
+          }
+          // Apply dropout lines: bright or dark lines representing tape damage
+          if (isDrop) {
+            const factor = Math.random() > 0.5 ? 0.3 : 1.7; // either darker or lighter
+            r *= factor;
+            g *= factor;
+            b *= factor;
+          }
+          // Clamp values and assign to output
+          output[idx] = Math.max(0, Math.min(255, r));
+          output[idx + 1] = Math.max(0, Math.min(255, g));
+          output[idx + 2] = Math.max(0, Math.min(255, b));
+          // Alpha stays 255
+        }
+      }
+      // Put modified image back to frame and draw to display
+      frame.data.set(output);
+      displayCtx.putImageData(frame, 0, 0);
+      requestAnimationFrame(processFrame);
     }
 
-    start();
+    // Start the webcam and rendering loop
+    startWebcam();
   </script>
 </body>
 </html>
