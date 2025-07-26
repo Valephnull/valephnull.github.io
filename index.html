@@ -258,74 +258,127 @@
       animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
-    // Apply NTSC/VHS effects to an ImageData object and return new ImageData
+    // Apply NTSC/VHS effects to an ImageData object and return new ImageData.
+    // This implementation more closely models the analog NTSC pipeline by converting
+    // RGB to YIQ, modulating the I/Q channels onto a color subcarrier, then
+    // demodulating and low‑pass filtering back to RGB. Additional optional
+    // artifacts (scanlines, noise, jitter, dropouts) can be toggled via the
+    // controls object.
     function applyNTSC(frame) {
-      const data = frame.data;
+      const src = frame.data;
       const width = frame.width;
       const height = frame.height;
-      const output = new Uint8ClampedArray(data); // copy of pixel data
-      // Precompute offsets for color bleed and jitter
-      const rowShiftR = new Int16Array(height);
-      const rowShiftB = new Int16Array(height);
-      const rowJitter = new Int16Array(height);
+      // Destination buffer
+      const out = new Uint8ClampedArray(width * height * 4);
+      // Preallocate per‑row arrays to avoid reallocations inside loops
+      const YArr = new Float32Array(width);
+      const IArr = new Float32Array(width);
+      const QArr = new Float32Array(width);
+      const comp = new Float32Array(width);
+      const IMod = new Float32Array(width);
+      const QMod = new Float32Array(width);
+      // Precompute subcarrier frequency factor based on image width. NTSC has
+      // ~227.5 color subcarrier cycles per line, so we compute cycles per pixel.
+      const twoPI = 2 * Math.PI;
+      const freqFactor = 227.5 / width;
+      // Iterate over each scanline
       for (let y = 0; y < height; y++) {
-        // Slight random horizontal shifts for red and blue channels; scaled by intensity
-        rowShiftR[y] = controls.color.checked ? Math.floor((Math.random() - 0.5) * 2 * intensity) : 0;
-        rowShiftB[y] = controls.color.checked ? Math.floor((Math.random() - 0.5) * 2 * intensity) : 0;
-        // Jitter (overall horizontal shift)
-        rowJitter[y] = controls.jitter.checked ? Math.floor((Math.random() - 0.5) * 4 * intensity) : 0;
-      }
-      // Optionally generate dropout lines positions
-      const dropoutLines = [];
-      if (controls.drop.checked) {
-        const dropCount = Math.floor(Math.random() * intensity * 3);
-        for (let i = 0; i < dropCount; i++) {
-          dropoutLines.push(Math.floor(Math.random() * height));
+        // Random phase jitter to simulate color carrier wobble
+        let phaseJitter = 0;
+        if (controls.jitter.checked) {
+          phaseJitter = (Math.random() - 0.5) * 0.4 * intensity;
         }
-      }
-      // Iterate over rows and columns
-      for (let y = 0; y < height; y++) {
-        const jitterOffset = rowJitter[y];
-        const shiftR = rowShiftR[y];
-        const shiftB = rowShiftB[y];
-        const isDrop = dropoutLines.includes(y);
+        // Convert RGB to YIQ and build composite signal
         for (let x = 0; x < width; x++) {
           const idx = (y * width + x) * 4;
-          // Compute indices for color-shifted channels (wrap around edges)
-          const xR = (x + shiftR + jitterOffset + width) % width;
-          const xB = (x + shiftB + jitterOffset + width) % width;
-          const baseIdxR = (y * width + xR) * 4;
-          const baseIdxB = (y * width + xB) * 4;
-          // Retrieve channels from source
-          let r = data[baseIdxR];
-          let g = data[idx + 1];
-          let b = data[baseIdxB + 2];
-          // Apply static noise
+          // Normalized RGB in range [0,1]
+          let R = src[idx] / 255;
+          let G = src[idx + 1] / 255;
+          let B = src[idx + 2] / 255;
+          // Optional additive static noise on RGB before conversion
           if (controls.noise.checked) {
-            const noise = (Math.random() - 0.5) * 30 * intensity;
-            r = r + noise;
-            g = g + noise;
-            b = b + noise;
+            const n = (Math.random() - 0.5) * 0.1 * intensity;
+            R = Math.min(1, Math.max(0, R + n));
+            G = Math.min(1, Math.max(0, G + n));
+            B = Math.min(1, Math.max(0, B + n));
           }
-          // Apply scanlines (interlacing) by darkening every other line
+          // Convert to YIQ
+          const Yval = 0.299 * R + 0.587 * G + 0.114 * B;
+          let Ival = 0.596 * R - 0.274 * G - 0.322 * B;
+          let Qval = 0.211 * R - 0.522 * G + 0.311 * B;
+          // Reduce chroma amplitude to avoid unrealistic oversaturation
+          const chromaScale = controls.color.checked ? (0.8 * intensity) : 0.0;
+          Ival *= chromaScale;
+          Qval *= chromaScale;
+          YArr[x] = Yval;
+          IArr[x] = Ival;
+          QArr[x] = Qval;
+          // Determine subcarrier angle: approx 227.5 cycles per line
+          // Add phaseJitter for dynamic wobble
+          if (controls.color.checked) {
+            const angle = twoPI * (x * freqFactor + phaseJitter);
+            comp[x] = Yval + Ival * Math.cos(angle) + Qval * Math.sin(angle);
+          } else {
+            // If color bleed disabled, just copy luma to composite
+            comp[x] = Yval;
+          }
+        }
+        // Demodulate chroma channels from composite
+        for (let x = 0; x < width; x++) {
+          if (controls.color.checked) {
+            const angle = twoPI * (x * freqFactor + phaseJitter);
+            IMod[x] = comp[x] * Math.cos(angle);
+            QMod[x] = comp[x] * Math.sin(angle);
+          } else {
+            IMod[x] = 0;
+            QMod[x] = 0;
+          }
+        }
+        // Simple low‑pass filter (sliding average) to simulate finite analog bandwidth
+        for (let x = 0; x < width; x++) {
+          let sumY = 0;
+          let sumI = 0;
+          let sumQ = 0;
+          let count = 0;
+          for (let k = -2; k <= 2; k++) {
+            const xi = x + k;
+            if (xi >= 0 && xi < width) {
+              sumY += comp[xi];
+              sumI += IMod[xi];
+              sumQ += QMod[xi];
+              count++;
+            }
+          }
+          const Yf = sumY / count;
+          // Multiply by 2 per demodulation theory (original subcarrier suppressed)
+          const If = (sumI / count) * 2;
+          const Qf = (sumQ / count) * 2;
+          // Convert back to RGB
+          let r = Yf + 0.956 * If + 0.621 * Qf;
+          let g = Yf - 0.272 * If - 0.647 * Qf;
+          let b = Yf - 1.106 * If + 1.703 * Qf;
+          // Apply optional scanlines (darken every other line)
           if (controls.scan.checked && (y % 2 === 0)) {
             r *= 0.8;
             g *= 0.8;
             b *= 0.8;
           }
-          // Dropout lines: set row to black
-          if (isDrop) {
+          // Apply dropout lines: occasionally blank segments
+          if (controls.drop.checked && Math.random() < 0.0005 * intensity) {
             r = g = b = 0;
           }
-          // Clamp values
-          output[idx] = Math.min(255, Math.max(0, r));
-          output[idx + 1] = Math.min(255, Math.max(0, g));
-          output[idx + 2] = Math.min(255, Math.max(0, b));
-          // Preserve alpha
-          output[idx + 3] = data[idx + 3];
+          // Clamp to [0,1]
+          r = Math.min(1, Math.max(0, r));
+          g = Math.min(1, Math.max(0, g));
+          b = Math.min(1, Math.max(0, b));
+          const outIdx = (y * width + x) * 4;
+          out[outIdx] = r * 255;
+          out[outIdx + 1] = g * 255;
+          out[outIdx + 2] = b * 255;
+          out[outIdx + 3] = 255;
         }
       }
-      return new ImageData(output, width, height);
+      return new ImageData(out, width, height);
     }
 
     // When page is unloaded, stop any media
