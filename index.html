@@ -95,8 +95,29 @@
       <label><input type="checkbox" id="toggleNoise" checked /> Static noise</label>
       <label><input type="checkbox" id="toggleJitter" checked /> Frame jitter</label>
       <label><input type="checkbox" id="toggleDrop" checked /> Dropout lines</label>
+      <label><input type="checkbox" id="toggleHead" /> Head switching noise</label>
+      <label><input type="checkbox" id="toggleBeard" /> Bearding</label>
+      <label><input type="checkbox" id="toggleTrack" /> Tracking error</label>
     </div>
-    <div id="intensity-indicator">Intensity: 100%</div>
+    <div class="controls">
+      <label>Hue: <input type="range" id="hueRange" min="-180" max="180" value="0" /></label>
+      <label>Saturation: <input type="range" id="satRange" min="0" max="200" value="100" /></label>
+      <label>Contrast: <input type="range" id="conRange" min="0" max="200" value="100" /></label>
+    </div>
+
+    <!-- Additional analog controls to expose many of the knobs found in the original NTSC‑RS effect.  -->
+    <div class="controls">
+      <label>Sharpen: <input type="range" id="sharpRange" min="0" max="3" step="0.1" value="0"></label>
+      <label>Ringing: <input type="range" id="ringRange" min="0" max="3" step="0.1" value="0"></label>
+      <label>Edge Wave: <input type="range" id="edgeRange" min="0" max="10" step="0.1" value="0"></label>
+      <label>Smear: <input type="range" id="smearRange" min="0" max="10" step="0.1" value="0"></label>
+    </div>
+    <div class="controls">
+      <label>Bandwidth: <input type="range" id="bandRange" min="0.25" max="1" step="0.05" value="1"></label>
+      <label>Chroma Noise: <input type="range" id="chromaRange" min="0" max="1" step="0.1" value="0"></label>
+      <label>Tape Speed: <input type="range" id="tapeRange" min="0.5" max="5" step="0.1" value="1"></label>
+      <label>Snow: <input type="range" id="snowRange" min="0" max="1" step="0.05" value="0.2"></label>
+    </div>
   </div>
   <script>
     // DOM references
@@ -108,42 +129,39 @@
     const displayCanvas = document.getElementById('displayCanvas');
     const sourceCtx = sourceCanvas.getContext('2d');
     const displayCtx = displayCanvas.getContext('2d');
-    const intensityIndicator = document.getElementById('intensity-indicator');
     const controls = {
       scan: document.getElementById('toggleScan'),
       color: document.getElementById('toggleColor'),
       noise: document.getElementById('toggleNoise'),
       jitter: document.getElementById('toggleJitter'),
       drop: document.getElementById('toggleDrop'),
+      head: document.getElementById('toggleHead'),
+      beard: document.getElementById('toggleBeard'),
+      track: document.getElementById('toggleTrack'),
     };
+    const hueRange = document.getElementById('hueRange');
+    const satRange = document.getElementById('satRange');
+    const conRange = document.getElementById('conRange');
 
-    let intensity = 1.0; // Global intensity factor
+    // Additional controls for advanced NTSC parameters
+    const sharpRange = document.getElementById('sharpRange');
+    const ringRange = document.getElementById('ringRange');
+    const edgeRange = document.getElementById('edgeRange');
+    const smearRange = document.getElementById('smearRange');
+    const bandRange = document.getElementById('bandRange');
+    const chromaRange = document.getElementById('chromaRange');
+    const tapeRange = document.getElementById('tapeRange');
+    const snowRange = document.getElementById('snowRange');
+
+    let intensity = 1.0; // base intensity used for some artifacts
+    let frameCount = 0; // frame counter used for tracking error animation
     let recording = false;
     let mediaRecorder = null;
     let recordedChunks = [];
     let animationFrameId = null;
     let currentSource = null; // 'video', 'image', or 'camera'
 
-    // Update intensity based on vertical position over display canvas
-    function updateIntensityFromPosition(y) {
-      const rect = displayCanvas.getBoundingClientRect();
-      const relativeY = Math.max(0, Math.min(y - rect.top, rect.height));
-      const ratio = 1 - (relativeY / rect.height);
-      // intensity ranges 0.5 to 2.0
-      intensity = 0.5 + (1.5 * ratio);
-      intensityIndicator.textContent = `Intensity: ${Math.round(intensity * 100)}%`;
-    }
-
-    displayCanvas.addEventListener('mousemove', (e) => {
-      if (e.buttons === 1 || e.buttons === 0) {
-        updateIntensityFromPosition(e.clientY);
-      }
-    });
-    displayCanvas.addEventListener('touchmove', (e) => {
-      if (e.touches.length) {
-        updateIntensityFromPosition(e.touches[0].clientY);
-      }
-    });
+    // Remove intensity slider behaviour. Intensity remains constant unless changed in code.
 
     // File input handler
     fileInput.addEventListener('change', async (e) => {
@@ -277,16 +295,33 @@
       const comp = new Float32Array(width);
       const IMod = new Float32Array(width);
       const QMod = new Float32Array(width);
+
+      // Fetch user‑controlled parameters. These correspond to settings found in the
+      // original NTSC‑RS application and allow for deep customization of the
+      // simulated analog pipeline.
+      const snowIntensity = parseFloat(snowRange.value);
+      const chromaNoiseIntensity = parseFloat(chromaRange.value);
+      const sharpenStrength = parseFloat(sharpRange.value);
+      const ringStrength = parseFloat(ringRange.value);
+      const edgeWaveIntensity = parseFloat(edgeRange.value);
+      const smearStrength = parseFloat(smearRange.value);
+      const bandScale = parseFloat(bandRange.value);
+      const tapeSpeed = parseFloat(tapeRange.value);
+      // Determine low‑pass filter radius based on bandwidth scale. Lower
+      // bandwidths result in more aggressive smoothing to emulate analog signal
+      // bandwidth limitations.
+      const lpRadius = Math.max(1, Math.round(2 + (1 - bandScale) * 6));
       // Precompute subcarrier frequency factor based on image width. NTSC has
       // ~227.5 color subcarrier cycles per line, so we compute cycles per pixel.
       const twoPI = 2 * Math.PI;
       const freqFactor = 227.5 / width;
       // Iterate over each scanline
       for (let y = 0; y < height; y++) {
-        // Random phase jitter to simulate color carrier wobble
+        // Random phase jitter to simulate color carrier wobble. Tape speed
+        // increases the magnitude of the jitter to emulate unstable decks.
         let phaseJitter = 0;
         if (controls.jitter.checked) {
-          phaseJitter = (Math.random() - 0.5) * 0.4 * intensity;
+          phaseJitter = (Math.random() - 0.5) * 0.2 * tapeSpeed;
         }
         // Convert RGB to YIQ and build composite signal
         for (let x = 0; x < width; x++) {
@@ -295,9 +330,9 @@
           let R = src[idx] / 255;
           let G = src[idx + 1] / 255;
           let B = src[idx + 2] / 255;
-          // Optional additive static noise on RGB before conversion
+          // Optional additive static snow on RGB before conversion
           if (controls.noise.checked) {
-            const n = (Math.random() - 0.5) * 0.1 * intensity;
+            const n = (Math.random() - 0.5) * snowIntensity;
             R = Math.min(1, Math.max(0, R + n));
             G = Math.min(1, Math.max(0, G + n));
             B = Math.min(1, Math.max(0, B + n));
@@ -306,8 +341,16 @@
           const Yval = 0.299 * R + 0.587 * G + 0.114 * B;
           let Ival = 0.596 * R - 0.274 * G - 0.322 * B;
           let Qval = 0.211 * R - 0.522 * G + 0.311 * B;
-          // Reduce chroma amplitude to avoid unrealistic oversaturation
-          const chromaScale = controls.color.checked ? (0.8 * intensity) : 0.0;
+          // Introduce chroma noise on the I/Q channels to emulate RF noise on the
+          // colour subcarrier. This uses a small random offset scaled by the
+          // user‑controlled chroma noise intensity.
+          if (chromaNoiseIntensity > 0) {
+            Ival += (Math.random() - 0.5) * 0.1 * chromaNoiseIntensity;
+            Qval += (Math.random() - 0.5) * 0.1 * chromaNoiseIntensity;
+          }
+          // Reduce chroma amplitude to avoid unrealistic oversaturation. With
+          // colour disabled the chroma channels are suppressed entirely.
+          const chromaScale = controls.color.checked ? (0.8) : 0.0;
           Ival *= chromaScale;
           Qval *= chromaScale;
           YArr[x] = Yval;
@@ -334,13 +377,18 @@
             QMod[x] = 0;
           }
         }
-        // Simple low‑pass filter (sliding average) to simulate finite analog bandwidth
+        // Low‑pass filter (sliding average) to simulate finite analog bandwidth.
+        // The radius of the filter is adjustable via the "Bandwidth" slider.
+        // Maintain previous pixel values for high‑frequency effects
+        let prevRVal = 0;
+        let prevGVal = 0;
+        let prevBVal = 0;
         for (let x = 0; x < width; x++) {
           let sumY = 0;
           let sumI = 0;
           let sumQ = 0;
           let count = 0;
-          for (let k = -2; k <= 2; k++) {
+          for (let k = -lpRadius; k <= lpRadius; k++) {
             const xi = x + k;
             if (xi >= 0 && xi < width) {
               sumY += comp[xi];
@@ -353,31 +401,137 @@
           // Multiply by 2 per demodulation theory (original subcarrier suppressed)
           const If = (sumI / count) * 2;
           const Qf = (sumQ / count) * 2;
-          // Convert back to RGB
-          let r = Yf + 0.956 * If + 0.621 * Qf;
-          let g = Yf - 0.272 * If - 0.647 * Qf;
-          let b = Yf - 1.106 * If + 1.703 * Qf;
-          // Apply optional scanlines (darken every other line)
-          if (controls.scan.checked && (y % 2 === 0)) {
-            r *= 0.8;
-            g *= 0.8;
-            b *= 0.8;
+        // Convert back to RGB
+        let r = Yf + 0.956 * If + 0.621 * Qf;
+        let g = Yf - 0.272 * If - 0.647 * Qf;
+        let b = Yf - 1.106 * If + 1.703 * Qf;
+        // Hue, saturation and contrast adjustments. Convert RGB (0–1) to HSL
+        let maxv = Math.max(r, g, b);
+        let minv = Math.min(r, g, b);
+        let h = 0, s = 0, l = (maxv + minv) / 2;
+        if (maxv !== minv) {
+          const d = maxv - minv;
+          s = l > 0.5 ? d / (2 - maxv - minv) : d / (maxv + minv);
+          switch (maxv) {
+            case r:
+              h = (g - b) / d + (g < b ? 6 : 0);
+              break;
+            case g:
+              h = (b - r) / d + 2;
+              break;
+            default:
+              h = (r - g) / d + 4;
           }
-          // Apply dropout lines: occasionally blank segments
-          if (controls.drop.checked && Math.random() < 0.0005 * intensity) {
+          h /= 6;
+        }
+        const hueOffset = parseFloat(hueRange.value) / 360;
+        h = (h + hueOffset) % 1;
+        if (h < 0) h += 1;
+        const satScale = parseFloat(satRange.value) / 100;
+        const conScale = parseFloat(conRange.value) / 100;
+        s = Math.min(1, Math.max(0, s * satScale));
+        // Convert back to RGB from HSL
+        if (s === 0) {
+          r = g = b = l;
+        } else {
+          const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+          };
+          const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+          const p = 2 * l - q;
+          r = hue2rgb(p, q, h + 1 / 3);
+          g = hue2rgb(p, q, h);
+          b = hue2rgb(p, q, h - 1 / 3);
+        }
+        // Apply contrast: scale around 0.5
+        r = (r - 0.5) * conScale + 0.5;
+        g = (g - 0.5) * conScale + 0.5;
+        b = (b - 0.5) * conScale + 0.5;
+        // Apply optional scanlines (darken every other line)
+        if (controls.scan.checked && (y % 2 === 0)) {
+          r *= 0.8;
+          g *= 0.8;
+          b *= 0.8;
+        }
+        // Apply dropout lines: occasionally blank segments. Use snow intensity to
+        // scale how often dropouts occur.
+        if (controls.drop.checked && Math.random() < 0.0005 * (1 + snowIntensity * 5)) {
+          r = g = b = 0;
+        }
+        // Bearding: horizontal black spikes to the right of bright areas
+        if (controls.beard.checked) {
+          const brightness = (r + g + b) / 3;
+          if (brightness > 0.8 && Math.random() < 0.1) {
             r = g = b = 0;
           }
-          // Clamp to [0,1]
-          r = Math.min(1, Math.max(0, r));
-          g = Math.min(1, Math.max(0, g));
-          b = Math.min(1, Math.max(0, b));
-          const outIdx = (y * width + x) * 4;
-          out[outIdx] = r * 255;
-          out[outIdx + 1] = g * 255;
-          out[outIdx + 2] = b * 255;
-          out[outIdx + 3] = 255;
+        }
+        // Save original values before high‑frequency effects
+        const origR = r;
+        const origG = g;
+        const origB = b;
+        // Horizontal smear: blend the current pixel with the previous pixel
+        if (smearStrength > 0) {
+          r = (r + smearStrength * prevRVal) / (1 + smearStrength);
+          g = (g + smearStrength * prevGVal) / (1 + smearStrength);
+          b = (b + smearStrength * prevBVal) / (1 + smearStrength);
+        }
+        // High‑pass difference for sharpen and ringing
+        const diffR = origR - prevRVal;
+        const diffG = origG - prevGVal;
+        const diffB = origB - prevBVal;
+        if (sharpenStrength > 0) {
+          r += diffR * sharpenStrength;
+          g += diffG * sharpenStrength;
+          b += diffB * sharpenStrength;
+        }
+        if (ringStrength > 0) {
+          r += (-diffR) * ringStrength * 0.5;
+          g += (-diffG) * ringStrength * 0.5;
+          b += (-diffB) * ringStrength * 0.5;
+        }
+        // Clamp values to [0,1]
+        r = Math.min(1, Math.max(0, r));
+        g = Math.min(1, Math.max(0, g));
+        b = Math.min(1, Math.max(0, b));
+        // Update previous pixel values for smear/sharpen/ringing for next pixel
+        prevRVal = r;
+        prevGVal = g;
+        prevBVal = b;
+        // Determine destination X coordinate for tracking error and edge wave
+        let destX = x;
+        if (controls.track.checked) {
+          const trackShift = Math.round(Math.sin((frameCount * 0.05 * tapeSpeed) + y * 0.02) * 2 * tapeSpeed);
+          destX = (destX + trackShift + width) % width;
+        }
+        if (edgeWaveIntensity > 0) {
+          const waveOffset = Math.round(Math.sin(y * 0.05 + frameCount * 0.02 * tapeSpeed) * edgeWaveIntensity);
+          destX = (destX + waveOffset + width) % width;
+        }
+        // Determine if head switching noise should apply to bottom lines
+        let rOut = r;
+        let gOut = g;
+        let bOut = b;
+        if (controls.head.checked) {
+          const noiseRegion = 0.04;
+          if (y > height * (1 - noiseRegion)) {
+            const noiseVal = Math.random();
+            rOut = gOut = bOut = noiseVal;
+          }
+        }
+        const destIdx = (y * width + destX) * 4;
+        out[destIdx] = rOut * 255;
+        out[destIdx + 1] = gOut * 255;
+        out[destIdx + 2] = bOut * 255;
+        out[destIdx + 3] = 255;
         }
       }
+      // Increment frame counter for tracking error animation
+      frameCount++;
       return new ImageData(out, width, height);
     }
 
