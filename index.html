@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dalek Voice Modulator</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #222;
+    color: #eee;
+    text-align: center;
+    padding: 20px;
+  }
+  h1 {
+    margin-bottom: 0;
+    font-size: 2.5em;
+  }
+  p {
+    font-size: 1.1em;
+    max-width: 600px;
+    margin: 0 auto 20px;
+  }
+  .control-group {
+    margin-bottom: 15px;
+    text-align: left;
+  }
+  label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+  }
+  input[type=range] {
+    width: 100%;
+  }
+  .container {
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 1em;
+    background-color: #0078d4;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 5px;
+  }
+  button:disabled {
+    background-color: #555;
+    cursor: default;
+  }
+  span {
+    display: inline-block;
+    width: 60px;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+<h1>Dalek Voice Modulator</h1>
+<p>Use your microphone and adjust the settings below to recreate the classic Dalek voice from Doctor Who. The Dalek voice uses ring modulation with a low‑frequency sine tone (around 30 Hz) and diode distortion【988990384758337†L18-L24】【562142353522387†L200-L241】. Use the sliders to tweak the ring‑mod frequency, depth, pitch shift, tremolo, distortion, and high‑pass filter. Click "Start microphone" to begin.</p>
+<div class="container">
+  <div class="control-group">
+    <label for="ringFreq">Ring Modulation Frequency (Hz)</label>
+    <input type="range" id="ringFreq" min="10" max="100" value="30" step="1">
+    <span id="ringFreqVal">30</span>
+  </div>
+  <div class="control-group">
+    <label for="ringDepth">Ring Depth</label>
+    <input type="range" id="ringDepth" min="0" max="1" value="1" step="0.01">
+    <span id="ringDepthVal">1.00</span>
+  </div>
+  <div class="control-group">
+    <label for="pitchShift">Pitch Shift (semitones)</label>
+    <input type="range" id="pitchShift" min="-12" max="12" value="0" step="1">
+    <span id="pitchShiftVal">0</span>
+  </div>
+  <div class="control-group">
+    <label for="tremoloFreq">Tremolo Frequency (Hz)</label>
+    <input type="range" id="tremoloFreq" min="0" max="20" value="0" step="0.1">
+    <span id="tremoloFreqVal">0.0</span>
+  </div>
+  <div class="control-group">
+    <label for="tremoloDepth">Tremolo Depth</label>
+    <input type="range" id="tremoloDepth" min="0" max="1" value="0" step="0.01">
+    <span id="tremoloDepthVal">0.00</span>
+  </div>
+  <div class="control-group">
+    <label for="distortion">Distortion Amount</label>
+    <input type="range" id="distortion" min="0" max="1" value="0.4" step="0.01">
+    <span id="distortionVal">0.40</span>
+  </div>
+  <div class="control-group">
+    <label for="highpass">High‑Pass Filter Frequency (Hz)</label>
+    <input type="range" id="highpass" min="0" max="3000" value="300" step="10">
+    <span id="highpassVal">300</span>
+  </div>
+  <button id="startBtn">Start Microphone</button>
+  <button id="stopBtn" disabled>Stop</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.min.js"></script>
+<script>
+let mic, ringOsc, crossFade, pitchShift, tremolo, distortion, highpass;
+let started = false;
+document.getElementById('startBtn').addEventListener('click', async () => {
+  if (started) return;
+  started = true;
+  await Tone.start();
+  mic = new Tone.UserMedia();
+  await mic.open();
+  ringOsc = new Tone.Oscillator({
+    frequency: parseFloat(document.getElementById('ringFreq').value),
+    type: 'sine'
+  }).start();
+  const ringMult = new Tone.Multiply();
+  crossFade = new Tone.CrossFade(parseFloat(document.getElementById('ringDepth').value));
+  mic.connect(ringMult, 0, 0);
+  ringOsc.connect(ringMult, 0, 1);
+  ringMult.connect(crossFade.b);
+  mic.connect(crossFade.a);
+  pitchShift = new Tone.PitchShift({
+    pitch: parseFloat(document.getElementById('pitchShift').value),
+    windowSize: 0.1
+  });
+  tremolo = new Tone.Tremolo({
+    frequency: parseFloat(document.getElementById('tremoloFreq').value),
+    depth: parseFloat(document.getElementById('tremoloDepth').value)
+  }).start();
+  distortion = new Tone.Distortion({
+    distortion: parseFloat(document.getElementById('distortion').value),
+    oversample: '4x'
+  });
+  highpass = new Tone.Filter({
+    type: 'highpass',
+    frequency: parseFloat(document.getElementById('highpass').value),
+    rolloff: -12
+  });
+  crossFade.chain(pitchShift, tremolo, distortion, highpass, Tone.getDestination());
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+});
+document.getElementById('stopBtn').addEventListener('click', () => {
+  if (!started) return;
+  started = false;
+  mic.close();
+  ringOsc.stop();
+  tremolo.stop();
+  pitchShift.dispose();
+  ringOsc.dispose();
+  tremolo.dispose();
+  distortion.dispose();
+  highpass.dispose();
+  crossFade.dispose();
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+});
+function updateValue(id, value) {
+  document.getElementById(id + 'Val').textContent = value;
+}
+document.getElementById('ringFreq').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('ringFreq', val);
+  if (ringOsc) ringOsc.frequency.value = val;
+});
+document.getElementById('ringDepth').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('ringDepth', val.toFixed(2));
+  if (crossFade) crossFade.fade.value = val;
+});
+document.getElementById('pitchShift').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('pitchShift', val);
+  if (pitchShift) pitchShift.pitch = val;
+});
+document.getElementById('tremoloFreq').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('tremoloFreq', val.toFixed(1));
+  if (tremolo) tremolo.frequency.value = val;
+});
+document.getElementById('tremoloDepth').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('tremoloDepth', val.toFixed(2));
+  if (tremolo) tremolo.depth.value = val;
+});
+document.getElementById('distortion').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('distortion', val.toFixed(2));
+  if (distortion) distortion.distortion = val;
+});
+document.getElementById('highpass').addEventListener('input', e => {
+  const val = parseFloat(e.target.value);
+  updateValue('highpass', val);
+  if (highpass) highpass.frequency.value = val;
+});
+</script>
+</body>
+</html>
